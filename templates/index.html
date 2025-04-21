@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Snellen Chart Vision Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; background: #f4f4f4; padding: 20px; }
+    .hidden { display: none; }
+    .snellen-line { margin: 15px 0; }
+    .snellen-letter { margin: 0 5px; font-weight: bold; font-family: 'Courier New', monospace; }
+    input[type="text"], input[type="number"] { padding: 6px; font-size: 16px; }
+    button { padding: 10px 20px; margin-top: 15px; background: #007bff; color: white; border: none; font-size: 16px; cursor: pointer; }
+    button:hover { background: #0056b3; }
+    #calibration-box { border: 2px dashed #333; border-radius: 8px; background: #fff; box-shadow: 0 0 5px rgba(0,0,0,0.2); height: 54px; margin: 10px auto; }
+  </style>
+</head>
+<body>
+  <h1>Snellen Chart Vision Test</h1>
+
+  <div id="step1">
+    <h2>Step 1: Screen Calibration</h2>
+    <p>Place a credit card horizontally inside the box. Adjust the slider until the width fits exactly.</p>
+    <div id="calibration-box" style="width: 300px; height: 189px;"></div>
+    <input type="range" id="calibration-slider" min="200" max="600" value="300">
+    <br>
+    <button id="calibrate-btn">It Fits – Continue</button>
+  </div>
+
+  <div id="step2" class="hidden">
+    <h2>Step 2: Sit 50 cm from the screen</h2>
+    <button id="distance-btn">I'm Ready</button>
+  </div>
+
+  <div id="step3" class="hidden">
+    <h2>Step 3: Enter Your Age</h2>
+    <input type="number" id="age-input" placeholder="e.g. 25" min="1" max="120">
+    <br>
+    <button id="start-btn">Start Test</button>
+  </div>
+
+  <div id="chart-container" class="hidden"></div>
+  <div id="results-form" class="hidden"></div>
+  <button id="calc-btn" class="hidden">Calculate Diagnosis</button>
+
+  <div id="summary" style="margin-top: 30px; font-size: 1.4em;"></div>
+  <div id="final-feedback" style="margin-top: 20px;"></div>
+
+  <script>
+    let pxPerMm = null;
+
+    const snellenLines = [
+      { label: "20/200", letters: ["E"] },
+      { label: "20/100", letters: ["F", "P"] },
+      { label: "20/70",  letters: ["T", "O", "Z"] },
+      { label: "20/50",  letters: ["L", "P", "E", "D"] },
+      { label: "20/40",  letters: ["P", "E", "C", "F", "D"] },
+      { label: "20/30",  letters: ["E", "D", "F", "C", "Z", "P"] },
+      { label: "20/25",  letters: ["F", "E", "L", "O", "P", "Z", "D"] },
+      { label: "20/20",  letters: ["D", "E", "F", "P", "O", "T", "E", "C"] },
+      { label: "20/15",  letters: ["L", "E", "F", "O", "D", "P", "C", "T"] },
+      { label: "20/13",  letters: ["F", "D", "P", "L", "T", "C", "E", "O"] },
+      { label: "20/10",  letters: ["P", "E", "Z", "O", "L", "C", "F", "T", "D"] }
+    ];
+
+    const snellenFontHeights = [
+      12, 6.1, 4.28, 3.04, 2.49,
+      1.8, 1.53, 1.25, 0.913, 0.83, 0.53
+    ];
+
+    function compareTypedLetters(userInput, expected) {
+      const results = [];
+      let correct = 0;
+      for (let i = 0; i < expected.length; i++) {
+        const userChar = userInput[i] || "";
+        const isCorrect = userChar === expected[i];
+        results.push({ letter: userChar, correct: isCorrect });
+        if (isCorrect) correct++;
+      }
+      return { correct, total: expected.length, results };
+    }
+
+    document.getElementById("calibration-slider").oninput = function () {
+      const width = this.value;
+      const cardAspect = 53.98 / 85.6;
+      const height = width * cardAspect;
+      const box = document.getElementById("calibration-box");
+      box.style.width = width + "px";
+      box.style.height = height + "px";
+    };
+
+    document.getElementById("calibrate-btn").onclick = () => {
+      const box = document.getElementById("calibration-box");
+      pxPerMm = box.offsetWidth / 85.6;
+      if (pxPerMm < 1) {
+        alert("Calibration failed. Please try again.");
+        return;
+      }
+      document.getElementById("step1").classList.add("hidden");
+      document.getElementById("step2").classList.remove("hidden");
+    };
+
+    document.getElementById("distance-btn").onclick = () => {
+      document.getElementById("step2").classList.add("hidden");
+      document.getElementById("step3").classList.remove("hidden");
+    };
+
+    document.getElementById("start-btn").onclick = () => {
+      const age = parseInt(document.getElementById("age-input").value);
+      if (!age || age <= 0) {
+        alert("Enter a valid age.");
+        return;
+      }
+      document.getElementById("step3").classList.add("hidden");
+      document.getElementById("chart-container").classList.remove("hidden");
+      document.getElementById("results-form").classList.remove("hidden");
+      generateSnellenChart();
+    };
+
+    function generateSnellenChart() {
+      const container = document.getElementById("chart-container");
+      const form = document.getElementById("results-form");
+      container.innerHTML = "";
+      form.innerHTML = "";
+
+      snellenLines.forEach((line, idx) => {
+        const fontSize = snellenFontHeights[idx] * pxPerMm;
+
+        const lineDiv = document.createElement("div");
+        lineDiv.className = "snellen-line";
+        lineDiv.style.fontSize = fontSize + "px";
+        lineDiv.style.lineHeight = fontSize + "px";
+
+        const label = document.createElement("span");
+        label.className = "line-label";
+        label.textContent = line.label + ": ";
+        lineDiv.appendChild(label);
+
+        line.letters.forEach(char => {
+          const letter = document.createElement("span");
+          letter.className = "snellen-letter";
+          letter.textContent = char;
+          lineDiv.appendChild(letter);
+        });
+
+        container.appendChild(lineDiv);
+
+        const inputRow = document.createElement("div");
+        inputRow.innerHTML = `
+          <div style="margin-top: 10px;">
+            <label>${line.label} – Type letters you saw: </label>
+            <input type="text" id="input-line${idx}" placeholder="e.g. EDP" style="width: 100px;" />
+          </div>
+        `;
+        form.appendChild(inputRow);
+      });
+
+      document.getElementById("calc-btn").classList.remove("hidden");
+    }
+
+    document.getElementById("calc-btn").onclick = () => {
+      const age = parseInt(document.getElementById("age-input").value);
+      let lastLineIdx = -1;
+      let mistakesOnLastLine = 0;
+      const feedbackHTML = [];
+
+      snellenLines.forEach((line, idx) => {
+        const input = document.getElementById("input-line" + idx);
+        const userInput = input.value.toUpperCase().replace(/[^A-Z]/g, "");
+        const expected = line.letters.join("");
+
+        if (userInput.length > 0) {
+          lastLineIdx = idx;
+
+          let correctCount = 0;
+          for (let i = 0; i < Math.min(userInput.length, expected.length); i++) {
+            if (userInput[i] === expected[i]) correctCount++;
+          }
+
+          mistakesOnLastLine = expected.length - correctCount;
+
+          const result = compareTypedLetters(userInput, expected);
+          const feedbackLine = result.results.map(r =>
+            r.letter
+              ? `<span style="color:${r.correct ? 'green' : 'red'};">${r.letter}${r.correct ? '✓' : '✗'}</span>`
+              : `<span style="color:gray;">_</span>`
+          ).join(" ");
+
+          feedbackHTML.push(`<p><strong>${line.label}</strong>: ${feedbackLine}</p>`);
+        }
+      });
+
+      if (isNaN(age) || lastLineIdx === -1) {
+        alert("Please fill in at least one line.");
+        return;
+      }
+
+      fetch("/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          line: lastLineIdx + 1,
+          mistakes: mistakesOnLastLine,
+          age: age
+        })
+      })
+      .then(res => res.json())
+      .then(data => {
+        document.getElementById("chart-container").classList.add("hidden");
+        document.getElementById("results-form").classList.add("hidden");
+        document.getElementById("calc-btn").classList.add("hidden");
+
+        const diagnosis = data.diagnosis && data.diagnosis !== "undefined"
+          ? data.diagnosis
+          : "⚠️ Error: Prediction failed. Check your input or try again.";
+
+        document.getElementById("summary").innerHTML = `
+          <h2>Your Result:</h2>
+          <div style="font-size:24px; color:darkred; margin-top:10px;">
+            <strong>${diagnosis}</strong>
+          </div>
+        `;
+
+        document.getElementById("final-feedback").innerHTML = `
+          <h3>Detailed Feedback:</h3>
+          ${feedbackHTML.join("")}
+        `;
+      })
+      .catch(error => {
+        console.error("❌ Fetch error:", error);
+        document.getElementById("summary").innerHTML = `
+          <strong style="color:red;">Something went wrong while contacting the server.</strong>
+        `;
+      });
+    };
+  </script>
+</body>
+</html>
